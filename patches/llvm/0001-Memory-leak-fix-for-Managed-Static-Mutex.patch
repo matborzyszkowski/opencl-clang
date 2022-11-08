@@ -8,24 +8,56 @@ Cleaning a mutex inside ManagedStatic llvm class.
  llvm/lib/Support/ManagedStatic.cpp | 6 +++++-
  1 file changed, 5 insertions(+), 1 deletion(-)
 
-diff --git a/llvm/lib/Support/ManagedStatic.cpp b/llvm/lib/Support/ManagedStatic.cpp
-index 28ceb1a70e4..9579000955e 100644
---- a/llvm/lib/Support/ManagedStatic.cpp
-+++ b/llvm/lib/Support/ManagedStatic.cpp
-@@ -77,8 +77,12 @@ void ManagedStaticBase::destroy() const {
+diff -Naur --strip-trailing-cr a/llvm/lib/Support/ManagedStatic.cpp b/llvm/lib/Support/ManagedStatic.cpp
+--- a/llvm/lib/Support/ManagedStatic.cpp	2018-07-30 12:41:25.000000000 -0700
++++ b/llvm/lib/Support/ManagedStatic.cpp	2022-11-04 10:08:05.620000000 +0100
+@@ -19,15 +19,9 @@
+ using namespace llvm;
+ 
+ static const ManagedStaticBase *StaticList = nullptr;
+-static sys::Mutex *ManagedStaticMutex = nullptr;
+-static llvm::once_flag mutex_init_flag;
+ 
+-static void initializeMutex() {
+-  ManagedStaticMutex = new sys::Mutex();
+-}
+-
+-static sys::Mutex* getManagedStaticMutex() {
+-  llvm::call_once(mutex_init_flag, initializeMutex);
++static sys::Mutex& getManagedStaticMutex() {
++  static sys::Mutex ManagedStaticMutex;
+   return ManagedStaticMutex;
+ }
+ 
+@@ -35,7 +29,8 @@
+                                               void (*Deleter)(void*)) const {
+   assert(Creator);
+   if (llvm_is_multithreaded()) {
+-    MutexGuard Lock(*getManagedStaticMutex());
++    //MutexGuard Lock(getManagedStaticMutex());
++    getManagedStaticMutex().lock();
+ 
+     if (!Ptr.load(std::memory_order_relaxed)) {
+       void *Tmp = Creator();
+@@ -47,6 +42,7 @@
+       Next = StaticList;
+       StaticList = this;
+     }
++    getManagedStaticMutex().unlock();
+   } else {
+     assert(!Ptr && !DeleterFn && !Next &&
+            "Partially initialized ManagedStatic!?");
+@@ -77,8 +73,11 @@
  
  /// llvm_shutdown - Deallocate and destroy all ManagedStatic variables.
  void llvm::llvm_shutdown() {
 -  MutexGuard Lock(*getManagedStaticMutex());
-+  getManagedStaticMutex()->lock();
++  //MutexGuard Lock(getManagedStaticMutex());
++  getManagedStaticMutex().lock();
  
    while (StaticList)
      StaticList->destroy();
 +
-+  getManagedStaticMutex()->unlock();
-+  delete ManagedStaticMutex;
-+  ManagedStaticMutex = nullptr;
++  getManagedStaticMutex().unlock();
  }
--- 
-2.29.2
 
